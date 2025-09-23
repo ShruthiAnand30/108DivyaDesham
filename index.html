@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Divya Desam – All 108 (Leaflet)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <!-- PapaParse -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <style>
+    /* Base */
+    html, body { height: 100%; margin: 0; font: 14px system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #topbar {
+      display:flex; gap:12px; align-items:center; padding:8px 12px;
+      background:#f8f9fb; border-bottom:1px solid #e6e8eb;
+    }
+    #status { color:#444; }
+    #app { display:grid; grid-template-columns: 340px 1fr; height: calc(100% - 50px); transition: grid-template-columns 200ms ease; }
+    #sidebar { border-right:1px solid #e6e8eb; overflow:auto; padding:10px; background:#fff; transition: transform 200ms ease, width 200ms ease; }
+    #map { height: 100%; }
+    .leaflet-popup-content { max-width: min(90vw, 360px); }
+    .leaflet-popup-content h3 { margin:0 0 6px; font-size:1.05rem; }
+
+    /* Topbar buttons */
+    #sidebarToggle {
+      border:1px solid #d0d5dc; background:#fff; border-radius:8px; padding:6px 10px;
+      cursor:pointer; font-size:14px;
+    }
+    #sidebarToggle:active { transform: translateY(1px); }
+
+    /* Sidebar close (mobile) */
+    .close-btn {
+      display:none; position:sticky; top:0; right:0; margin-left:auto;
+      border:none; background:#fff; font-size:18px; padding:6px 8px; cursor:pointer;
+      border-radius:6px; box-shadow:0 0 0 1px #e6e8eb inset;
+    }
+
+    /* Sidebar UI */
+    .searchbox { display:flex; gap:8px; margin-bottom:10px; position:sticky; top:0; background:#fff; padding-top:6px; }
+    .searchbox input {
+      width:100%; padding:10px 12px; border:1px solid #d0d5dc; border-radius:8px; font-size:16px;
+    }
+    .tiny-dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+    details { margin-bottom:6px; }
+    details > summary { cursor:pointer; padding:6px 4px; border-radius:6px; font-weight:600; list-style:none; }
+    details > summary::-webkit-details-marker { display:none; }
+    .subcluster { margin:6px 0 6px 12px; padding:4px 6px; border-left:2px solid #e6e8eb; }
+    .temple-list { margin:4px 0 80px 16px; padding:0; list-style:none; }
+    .temple-item { margin:0; padding:6px 0; }
+    .temple-link { cursor:pointer; color:#1849a9; text-decoration:none; border-radius:6px; padding:4px 0; display:inline-block; }
+    .temple-link:hover { text-decoration:underline; }
+    .temple-link:active { background:#eef3ff; }
+    .count-badge { color:#555; font-weight:500; margin-left:6px; font-size:12px; }
+    .muted { color:#6b7280; }
+
+    /* Mobile drawer */
+    @media (max-width: 900px) {
+      #app { display:block; height: calc(100dvh - 50px); }
+      #map { height: calc(100dvh - 50px); }
+      #sidebar {
+        position: fixed; z-index: 1000; top: 50px; left: 0; right: 0;
+        height: calc(100dvh - 50px);
+        transform: translateX(-100%);
+        border-right: none; border-top: 1px solid #e6e8eb;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+      }
+      #sidebar.open { transform: translateX(0); }
+      .close-btn { display:block; }
+      .custom-cluster { transform: scale(1.05); }
+    }
+
+    /* Cluster toggle control (top-right) */
+    .leaflet-control-cluster-toggle {
+      background:#fff; border:1px solid #d0d5dc; border-radius:10px;
+      padding:6px 10px; font: 14px system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      cursor:pointer; box-shadow: 0 1px 2px rgba(0,0,0,.06);
+    }
+    .leaflet-control-cluster-toggle:active { transform: translateY(1px); }
+    @media (max-width: 900px) {
+      .leaflet-control-cluster-toggle { padding:10px 12px; font-size:16px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <button id="sidebarToggle" aria-label="Open filters" title="Open filters">☰ Filter</button>
+    <strong>Divya Desam Map</strong>
+    <span id="status">Loading…</span>
+    <label style="margin-left:auto">Or load CSV:
+      <input type="file" id="csvfile" accept=".csv" />
+    </label>
+  </div>
+
+  <div id="app">
+    <aside id="sidebar">
+      <button id="sidebarClose" aria-label="Close filters" title="Close" class="close-btn">✕</button>
+      <div class="searchbox">
+        <input id="filter" type="search" placeholder="Filter temples or places…" />
+      </div>
+      <div id="hierarchy" class="muted">Hierarchy will appear here after CSV loads…</div>
+    </aside>
+    <div id="map"></div>
+    <!-- Global audio player (no autoplay) -->
+    <audio id="dd-audio" preload="none"></audio>
+  </div>
+
+  <script>
+  // ------------------ Config ------------------
+  const CSV_URL = "Leaflet_Points_All108.csv"; // put next to this HTML
+  const DEFAULT_CENTER = [10.9, 78.7];
+  const DEFAULT_ZOOM = 6;
+
+  // Per-cluster colors (fallback if CSV marker_color blank)
+  const clusterColorMap = {
+    "Chola Nadu (North)": "#d62728",
+    "Chola Nadu (South)": "#ff7f0e",
+    "Nadu Nadu": "#bcbd22",
+    "Tondai Nadu": "#2ca02c",
+    "Pandiya Nadu": "#1f77b4",
+    "Malai Nadu (Kerala)": "#9467bd",
+    "Vada Nadu (North India)": "#e377c2",
+    "Vada Nadu (South Deccan)": "#17becf",
+    "Vinnulagam (Celestial)": "#7f7f7f",
+    "Unassigned": "#7f7f7f"
+  };
+
+  // ------------------ UI helpers ------------------
+  const $status = document.getElementById("status");
+  const $hier = document.getElementById("hierarchy");
+  const $filter = document.getElementById("filter");
+  const $sidebar = document.getElementById("sidebar");
+  const $sidebarToggle = document.getElementById("sidebarToggle");
+  const $sidebarClose  = document.getElementById("sidebarClose");
+
+  function setStatus(msg, isError=false) {
+    $status.textContent = msg;
+    $status.style.color = isError ? "#b00020" : "#444";
+  }
+
+  function openSidebar() {
+    $sidebar.classList.add("open");
+    try { map.dragging.disable(); map.scrollWheelZoom.disable(); } catch (_){}
+    map.once("click", closeSidebar);
+    try { map.invalidateSize(); } catch (_){}
+  }
+  function closeSidebar() {
+    $sidebar.classList.remove("open");
+    try { map.dragging.enable(); map.scrollWheelZoom.enable(); } catch (_){}
+    try { map.invalidateSize(); } catch (_){}
+  }
+  $sidebarToggle.addEventListener("click", openSidebar);
+  $sidebarClose.addEventListener("click", closeSidebar);
+  function maybeCloseSidebarForMobile() {
+    if (window.matchMedia("(max-width: 900px)").matches) closeSidebar();
+  }
+
+  // ------------------ Map init ------------------
+  const map = L.map("map", { zoomControl: true }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+
+  // Groups
+  const layerGroups = {};                 // clustered groups: { [cluster_group]: L.MarkerClusterGroup }
+  const allLayers = L.markerClusterGroup();
+  const markerById = new Map();
+
+  // Cluster mode state + plain groups
+  let clusterMode = true;                 // true = clustered (default), false = unclustered
+  const clusteredGroups = layerGroups;    // alias for clarity
+  const plainGroups = {};                 // { [cluster_group]: L.LayerGroup }
+  const allPlain = L.layerGroup();        // combined unclustered
+
+  function ensurePlainGroup(name) {
+    if (!plainGroups[name]) plainGroups[name] = L.layerGroup();
+    return plainGroups[name];
+  }
+
+  // ------------------ Utils ------------------
+  function pick(...vals) {
+    for (const v of vals) if (v !== null && v !== undefined && String(v).trim() !== "") return String(v).trim();
+    return "";
+  }
+  function num(x) {
+    if (x === null || x === undefined) return NaN;
+    return parseFloat(String(x).replace(/[^\d\.\-]/g, "").trim());
+  }
+  function getNumberFromKeys(row, keys) {
+    for (const k of keys) if (k in row && row[k] != null && String(row[k]).trim() !== "") {
+      const v = num(row[k]); if (!isNaN(v)) return v;
+    }
+    return NaN;
+  }
+  const LAT_KEYS = ["lat","Lat","LAT","latitude","Latitude","LATITUDE"];
+  const LNG_KEYS = ["lng","Lng","LNG","lon","Lon","LON","longitude","Longitude","LONGITUDE"];
+
+  function pickColor(row) {
+    const c = (row.marker_color || "").trim();
+    if (c) return c;
+    const group = pick(row.cluster_group, "Unassigned");
+    return clusterColorMap[group] || "#d62728";
+  }
+
+  // Flexible getter for CSV fields (survives header quirks)
+  function val(row, ...names) {
+    for (const name of names) {
+      const variants = [
+        name,
+        String(name).trim(),
+        String(name).toLowerCase(),
+        String(name).trim().toLowerCase(),
+        String(name).replace(/\s+/g, ""),
+        String(name).trim().replace(/\s+/g, ""),
+        String(name).replace(/\s+/g, "_"),
+        String(name).trim().replace(/\s+/g, "_"),
+      ];
+      for (const v of variants) {
+        for (const key of Object.keys(row)) {
+          const kk = key.replace(/\r$/, ""); // strip stray CR from CSV headers
+          if (kk === v) {
+            const x = row[key];
+            if (x != null && String(x).trim() !== "") return String(x);
+          }
+        }
+      }
+    }
+    return "";
+  }
+
+  // Safe media URL
+  function normalizeMediaUrl(raw, defaultExt = "") {
+    let url = (raw || "").trim();
+    if (!url) return "";
+    if (url.startsWith("/")) url = url.slice(1);
+    url = url.split("/").map(seg => {
+      try { seg = decodeURIComponent(seg); } catch (_) {}
+      return encodeURIComponent(seg);
+    }).join("/");
+    if (defaultExt && !/\.[a-z0-9]+(\?|#|$)/i.test(url)) {
+      url += defaultExt.startsWith(".") ? defaultExt : ("." + defaultExt);
+    }
+    return url;
+  }
+
+  function markerRadius() {
+    return window.matchMedia("(max-width: 900px)").matches ? 9 : 7;
+  }
+
+  function makeTooltip(r) {
+    const base = pick(r.title, r.common_name, r["sthālam"], r.sthalam, r.popup_title, "Divya Desam");
+    const city = pick(r.city);
+    return city ? `${base} • ${city}` : base;
+  }
+
+  function makePopup(r, title) {
+    const rawDesc  = (pick(r.popup_html, "") || "").trim();
+    const rawAudio = (val(r, "audio_url", "audio") || "").trim();
+    const rawImg   = (val(r, "image_url", "image", "photo", "img") || "").trim();
+
+    const audio = normalizeMediaUrl(rawAudio, ".mp3"); // keeps .m4a if present
+    const img   = normalizeMediaUrl(rawImg);
+
+    // Base HTML (use popup_html verbatim if present)
+    let html = rawDesc ? rawDesc : (() => {
+      const admin = [pick(r.city), pick(r.district), pick(r.state), pick(r.country)]
+        .filter(Boolean).join(", ");
+      const cluster = [pick(r.cluster_group), pick(r.subcluster_group)]
+        .filter(Boolean).join(" / ");
+      let out = `<h3 style="margin:0">${title}</h3>`;
+      if (admin)   out += `<div><b>Location:</b> ${admin}</div>`;
+      if (cluster) out += `<div><b>Cluster:</b> ${cluster}</div>`;
+      return out;
+    })();
+
+    // Image first
+    if (img) {
+      const safeImg = img.replace(/"/g, "&quot;");
+      html = `<div style="margin-bottom:8px">
+        <img class="dd-popup-img" src="${safeImg}" alt="${title}" loading="eager"
+             style="max-width:100%;height:auto;border-radius:6px;display:block;" />
+      </div>` + html;
+    }
+
+    // Audio controls (no autoplay)
+    if (audio) {
+      const safeAudio = audio.replace(/"/g, "&quot;");
+      html += `<div style="margin-top:8px">
+        <audio controls preload="none" src="${safeAudio}" style="width:100%"></audio>
+      </div>`;
+    }
+
+    return html;
+  }
+
+  function ensureClusterGroup(name, color) {
+    if (!layerGroups[name]) {
+      layerGroups[name] = L.markerClusterGroup({
+        iconCreateFunction: (cluster) => {
+          const count = cluster.getChildCount();
+          const div = document.createElement('div');
+          div.style.background = color;
+          div.style.color = '#fff';
+          div.style.borderRadius = '22px';
+          div.style.width = div.style.height = '44px';
+          div.style.display = 'flex';
+          div.style.alignItems = 'center';
+          div.style.justifyContent = 'center';
+          div.style.border = '2px solid #fff';
+          div.style.fontWeight = '600';
+          div.textContent = count;
+          return L.divIcon({ html: div, className: 'custom-cluster', iconSize: [44, 44] });
+        }
+      });
+    }
+    return layerGroups[name];
+  }
+
+  // ------------------ Sidebar (Hierarchy) ------------------
+  function buildHierarchy(rows, filterText="") {
+    const f = filterText.trim().toLowerCase();
+    const groups = {}; // { cluster_group: { color, subs: { subcluster: [rows] } } }
+
+    rows.forEach(r => {
+      const hay = [
+        r.title, r.common_name, r.sthalam, r["sthālam"],
+        r.city, r.district, r.state, r.cluster_group, r.subcluster_group
+      ].map(x => (x||"").toString().toLowerCase()).join(" ");
+      if (f && !hay.includes(f)) return;
+
+      const cg = pick(r.cluster_group, "Unassigned");
+      const scg = pick(r.subcluster_group, "—");
+      const color = pickColor(r);
+      if (!groups[cg]) groups[cg] = { color, subs: {} };
+      if (!groups[cg].subs[scg]) groups[cg].subs[scg] = [];
+      groups[cg].subs[scg].push(r);
+    });
+
+    // Render
+    const frag = document.createDocumentFragment();
+    Object.keys(groups).sort().forEach(cg => {
+      const group = groups[cg];
+      const groupWrap = document.createElement("details");
+      groupWrap.open = false;
+      const groupSum = document.createElement("summary");
+      groupSum.innerHTML = `<span class="tiny-dot" style="background:${group.color}"></span>
+        <strong>${cg}</strong>
+        <span class="count-badge">(${Object.values(group.subs).reduce((a,b)=>a+b.length,0)})</span>`;
+      groupWrap.appendChild(groupSum);
+
+      Object.keys(group.subs).sort().forEach(scg => {
+        const subDetails = document.createElement("details");
+        subDetails.open = false;
+        const subSum = document.createElement("summary");
+        subSum.innerHTML = `<strong>${scg}</strong> <span class="count-badge">(${group.subs[scg].length})</span>`;
+        subDetails.appendChild(subSum);
+
+        const ul = document.createElement("ul");
+        ul.className = "temple-list";
+        group.subs[scg]
+          .sort((a,b) => String(a.title).localeCompare(String(b.title)))
+          .forEach(row => {
+            const li = document.createElement("li");
+            li.className = "temple-item";
+            const a = document.createElement("a");
+            a.className = "temple-link";
+            const dot = document.createElement("span");
+            dot.className = "tiny-dot";
+            dot.style.background = group.color;
+            a.appendChild(dot);
+            a.appendChild(document.createTextNode(pick(row.title, row.common_name, row.sthalam, row["sthālam"])));
+            a.href = "javascript:void(0)";
+            a.addEventListener("click", () => focusTemple(row));
+            li.appendChild(a);
+            ul.appendChild(li);
+        });
+        subDetails.appendChild(ul);
+        groupWrap.appendChild(subDetails);
+      });
+
+      frag.appendChild(groupWrap);
+    });
+
+    $hier.innerHTML = "";
+    $hier.appendChild(frag);
+
+    if (!Object.keys(groups).length) {
+      $hier.textContent = "No results match your filter.";
+    }
+  }
+
+  function focusTemple(row) {
+    const key = pick(row.id, row.ID);
+    const m = markerById.get(String(key)) || null;
+    if (m) {
+      try { map.setView(m.getLatLng(), Math.max(map.getZoom(), 12)); } catch(e){}
+      m.openPopup();
+      maybeCloseSidebarForMobile();
+    } else {
+      if (allPlain.getLayers().length) {
+        try { map.fitBounds(allPlain.getBounds(), { padding: [20,20] }); } catch(e){}
+      }
+      alert("No coordinates for this temple yet — add lat/lng in the CSV to enable zoom.");
+    }
+  }
+
+  // ------------------ Cluster toggle helpers ------------------
+  let layersControl = null;
+
+  function currentOverlayMap() {
+    const overlays = {};
+    const src = clusterMode ? clusteredGroups : plainGroups;
+    Object.keys(src).forEach((name) => { overlays[name] = src[name]; });
+    return overlays;
+  }
+
+  function applyClusterMode() {
+    // remove all first
+    Object.values(clusteredGroups).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+    Object.values(plainGroups).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+
+    // add the active mode groups
+    const src = clusterMode ? clusteredGroups : plainGroups;
+    Object.keys(src).forEach((name) => {
+      if (!map.hasLayer(src[name])) map.addLayer(src[name]);
+    });
+
+    // rebuild layers control
+    if (layersControl) { try { map.removeControl(layersControl); } catch(_) {} layersControl = null; }
+    layersControl = L.control.layers(null, currentOverlayMap(), { collapsed: true }).addTo(map);
+
+    // update button label
+    if (clusterToggleBtn) {
+      clusterToggleBtn.textContent = clusterMode ? "Shrink (Cluster)" : "Expand (Uncluster)";
+      clusterToggleBtn.setAttribute("aria-pressed", String(!clusterMode));
+      clusterToggleBtn.setAttribute("title", clusterMode ? "Switch to unclustered view" : "Switch to clustered view");
+    }
+
+    try { map.invalidateSize(); } catch (_) {}
+  }
+
+  // --- Top-right Cluster Toggle Control ---
+  let clusterToggleBtn = null;
+  const ClusterToggleControl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd: function () {
+      const btn = L.DomUtil.create('button', 'leaflet-control-cluster-toggle');
+      btn.type = 'button';
+      btn.textContent = clusterMode ? "Shrink (Cluster)" : "Expand (Uncluster)";
+      btn.setAttribute("aria-label", "Toggle clustering");
+      btn.setAttribute("aria-pressed", String(!clusterMode));
+      btn.setAttribute("title", clusterMode ? "Switch to unclustered view" : "Switch to clustered view");
+
+      L.DomEvent.disableClickPropagation(btn);
+      L.DomEvent.on(btn, 'click', function (e) {
+        e.preventDefault();
+        clusterMode = !clusterMode;
+        applyClusterMode();
+      });
+
+      clusterToggleBtn = btn;
+      return btn;
+    }
+  });
+  map.addControl(new ClusterToggleControl());
+
+  // ------------------ Data & Map population ------------------
+  let currentRows = [];
+  function addRows(rows) {
+    let added = 0;
+
+    rows.forEach((r) => {
+      const lat = getNumberFromKeys(r, LAT_KEYS);
+      const lng = getNumberFromKeys(r, LNG_KEYS);
+      if (isNaN(lat) || isNaN(lng)) return;
+
+      const id = pick(r.id, r.ID);
+      const color = pickColor(r);
+      const title = pick(r.title, r.common_name, r["sthālam"], r.sthalam, r.popup_title, "Divya Desam");
+      const tooltip = makeTooltip(r);
+      const popupHTML = makePopup(r, title);
+
+      const marker = L.circleMarker([lat, lng], {
+        radius: markerRadius(), color, weight: 2, fillColor: color, fillOpacity: 0.9
+      }).bindTooltip(tooltip)
+        .bindPopup(popupHTML, { maxWidth: 340 });
+
+      // Image debug (no audio autoplay)
+      marker.on('popupopen', (ev) => {
+        try {
+          const el = ev.popup.getElement && ev.popup.getElement();
+          const img = el && el.querySelector && el.querySelector("img.dd-popup-img");
+          if (img) {
+            const srcShown = img.getAttribute("src");
+            img.addEventListener("load", () => setStatus(`Loaded image: ${srcShown}`), { once: true });
+            img.addEventListener("error", () => setStatus(`Image not found: ${srcShown}`, true), { once: true });
+          }
+        } catch (e) { console.warn("Image hook error:", e); }
+      });
+
+      const groupName = pick(r.cluster_group, "Unassigned");
+
+      // clustered
+      const clusterLayer = ensureClusterGroup(groupName, color);
+      clusterLayer.addLayer(marker);
+
+      // plain (unclustered)
+      const plainLayer = ensurePlainGroup(groupName);
+      plainLayer.addLayer(marker);
+
+      // combined collections
+      allLayers.addLayer(marker);
+      allPlain.addLayer(marker);
+
+      if (id) markerById.set(String(id), marker);
+      added += 1;
+    });
+
+    if (added > 0) {
+      try { map.fitBounds(allPlain.getBounds(), { padding: [20,20] }); } catch (e) {}
+      try { map.invalidateSize(); } catch (e) {}
+      setStatus(`Loaded ${added} markers.`);
+    } else {
+      setStatus("No markers added. Check that your CSV has latitude/longitude values.", true);
+    }
+  }
+
+  // ------------------ Load CSV (fetch) ------------------
+  function loadViaFetch() {
+    setStatus("Loading CSV via fetch…");
+    Papa.parse(CSV_URL + "?v=" + Date.now(), {
+      download: true, header: true, skipEmptyLines: true, dynamicTyping: false,
+      complete: (results) => {
+        if (!results || !results.data) {
+          setStatus("Failed to parse CSV (empty results). Try uploading the file manually.", true);
+          return;
+        }
+        currentRows = results.data;
+        buildHierarchy(currentRows);
+        addRows(currentRows);
+        applyClusterMode(); // build correct layer control & apply current mode
+      },
+      error: (err) => {
+        console.error("CSV parse error:", err);
+        setStatus("Fetch failed. Use the file picker (top-right) to load your CSV manually.", true);
+      }
+    });
+  }
+
+  // ------------------ Load CSV (file input fallback) ------------------
+  document.getElementById("csvfile").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setStatus("Parsing uploaded CSV…");
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true, dynamicTyping: false,
+      complete: (results) => {
+        if (!results || !results.data) {
+          setStatus("Uploaded CSV could not be parsed.", true);
+          return;
+        }
+        currentRows = results.data;
+        buildHierarchy(currentRows);
+        addRows(currentRows);
+        applyClusterMode(); // build correct layer control & apply current mode
+      },
+      error: (err) => {
+        console.error("CSV parse error:", err);
+        setStatus("Upload parse error. Check the file format.", true);
+      }
+    });
+  });
+
+  // ------------------ Filter logic ------------------
+  $filter.addEventListener("input", () => {
+    buildHierarchy(currentRows, $filter.value);
+  });
+
+  // Resize/Orientation fixes for mobile
+  window.addEventListener("orientationchange", () => setTimeout(() => map.invalidateSize(), 250));
+  window.addEventListener("resize", () => setTimeout(() => map.invalidateSize(), 250));
+
+  // Start
+  loadViaFetch();
+  </script>
+</body>
+</html>
