@@ -357,15 +357,28 @@
   map.addControl(new MediaDockControl());
   function showMediaInDock(row) {
     if (!mediaDockEl) return;
+
+  // Extract media presence
+    const rawAudio = (val(row, "audio_url", "audio") || "").trim();
+    const rawImg   = (val(row, "image_url", "image", "photo", "img") || "").trim();
+    const hasMedia = !!rawAudio || !!rawImg;
+
+    if (!hasMedia) {
+    // Clear the dock if this temple has no image/audio
+      mediaDockEl.innerHTML = `<em>No image/audio for this temple.</em>`;
+      return;
+    }
+
     const title = pick(row.title, row.common_name, row["sthālam"], row.sthalam, row.popup_title, "Divya Desam");
-    const html = makePopup(row, title);
+    const html  = makePopup(row, title);
     mediaDockEl.innerHTML = html;
-    // optional status hooks
+
+    // Optional: status for image load
     try {
       const img = mediaDockEl.querySelector("img.dd-popup-img");
       if (img) {
         const srcShown = img.getAttribute("src");
-        img.addEventListener("load", () => setStatus(`Loaded image: ${srcShown}`), { once: true });
+        img.addEventListener("load",  () => setStatus(`Loaded image: ${srcShown}`), { once: true });
         img.addEventListener("error", () => setStatus(`Image not found: ${srcShown}`, true), { once: true });
       }
     } catch (_) {}
@@ -427,7 +440,11 @@
             a.appendChild(document.createTextNode(pick(row.title, row.common_name, row.sthalam, row["sthālam"])));
             a.href = "javascript:void(0)";
             /* *** CHANGE: also show media in dock even if no coordinates *** */
-            a.addEventListener("click", () => { focusTemple(row); showMediaInDock(row); });
+            a.addEventListener("click", () => {
+              map.closePopup();               // 🔧 close previously open popup
+              focusTemple(row);
+              showMediaInDock(row);
+            });
             /* *** END CHANGE *** */
             li.appendChild(a);
             ul.appendChild(li);
@@ -647,3 +664,4 @@
   </script>
 </body>
 </html>
+
