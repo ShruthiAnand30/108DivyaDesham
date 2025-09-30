@@ -91,18 +91,6 @@
     @media (max-width: 900px) {
       .leaflet-control-cluster-toggle { padding:10px 12px; font-size:16px; }
     }
-
-    /* *** CHANGE: Media dock (fixed UI, coordinates not required) *** */
-    .leaflet-control-media-dock {
-      background:#fff; border:1px solid #d0d5dc; border-radius:12px;
-      padding:10px; width:min(340px, 90vw); max-height:60vh; overflow:auto;
-      box-shadow:0 6px 20px rgba(0,0,0,.12);
-    }
-    .leaflet-control-media-dock h3 { margin:6px 0 8px; font-size:1.05rem; }
-    .leaflet-control-media-dock .dd-popup-img { border-radius:6px; display:block; max-width:100%; height:auto; }
-    @media (max-width: 900px) {
-      .leaflet-control-media-dock { width:min(420px, 92vw); max-height:55vh; }
-    }
   </style>
 </head>
 <body>
@@ -339,52 +327,6 @@
     return layerGroups[name];
   }
 
-  /* *** CHANGE: Media Dock (no-coordinates overlay) *** */
-  let mediaDockEl = null;
-  const MediaDockControl = L.Control.extend({
-    options: { position: 'topright' },
-    onAdd: function () {
-      const div = L.DomUtil.create('div', 'leaflet-control-media-dock');
-      div.id = 'mediaDock';
-      div.innerHTML = `<em>Select a temple on the left to see image/audio here.</em>`;
-      // prevent map panning while interacting
-      L.DomEvent.disableClickPropagation(div);
-      L.DomEvent.on(div, 'mousewheel', L.DomEvent.stopPropagation);
-      mediaDockEl = div;
-      return div;
-    }
-  });
-  map.addControl(new MediaDockControl());
-  function showMediaInDock(row) {
-    if (!mediaDockEl) return;
-
-  // Extract media presence
-    const rawAudio = (val(row, "audio_url", "audio") || "").trim();
-    const rawImg   = (val(row, "image_url", "image", "photo", "img") || "").trim();
-    const hasMedia = !!rawAudio || !!rawImg;
-
-    if (!hasMedia) {
-    // Clear the dock if this temple has no image/audio
-      mediaDockEl.innerHTML = `<em>No image/audio for this temple.</em>`;
-      return;
-    }
-
-    const title = pick(row.title, row.common_name, row["sthālam"], row.sthalam, row.popup_title, "Divya Desam");
-    const html  = makePopup(row, title);
-    mediaDockEl.innerHTML = html;
-
-    // Optional: status for image load
-    try {
-      const img = mediaDockEl.querySelector("img.dd-popup-img");
-      if (img) {
-        const srcShown = img.getAttribute("src");
-        img.addEventListener("load",  () => setStatus(`Loaded image: ${srcShown}`), { once: true });
-        img.addEventListener("error", () => setStatus(`Image not found: ${srcShown}`, true), { once: true });
-      }
-    } catch (_) {}
-  }
-  /* *** END CHANGE *** */
-
   // ------------------ Sidebar (Hierarchy) ------------------
   function buildHierarchy(rows, filterText="") {
     const f = filterText.trim().toLowerCase();
@@ -439,13 +381,7 @@
             a.appendChild(dot);
             a.appendChild(document.createTextNode(pick(row.title, row.common_name, row.sthalam, row["sthālam"])));
             a.href = "javascript:void(0)";
-            /* *** CHANGE: also show media in dock even if no coordinates *** */
-            a.addEventListener("click", () => {
-              map.closePopup();               // 🔧 close previously open popup
-              focusTemple(row);
-              showMediaInDock(row);
-            });
-            /* *** END CHANGE *** */
+            a.addEventListener("click", () => focusTemple(row));
             li.appendChild(a);
             ul.appendChild(li);
         });
@@ -464,22 +400,29 @@
     }
   }
 
-  /* *** CHANGE: soften no-coordinates behavior (remove alert) *** */
+  /* ====== ONLY CHANGE: make no-coords rows show media popup at map center ====== */
   function focusTemple(row) {
     const key = pick(row.id, row.ID);
     const m = markerById.get(String(key)) || null;
+
     if (m) {
+      // Has coordinates → pan to marker + open popup
       try { map.setView(m.getLatLng(), Math.max(map.getZoom(), 12)); } catch(e){}
       m.openPopup();
       maybeCloseSidebarForMobile();
     } else {
-      if (allPlain.getLayers().length) {
-        try { map.fitBounds(allPlain.getBounds(), { padding: [20,20] }); } catch(e){}
-      }
+      // No coordinates → render the same HTML used in marker popups at map center
+      const title = pick(row.title, row.common_name, row["sthālam"], row.sthalam, row.popup_title, "Divya Desam");
+      const popupHTML = makePopup(row, title);
+      L.popup({ maxWidth: 340, closeOnClick: true, autoClose: true })
+        .setLatLng(map.getCenter())
+        .setContent(popupHTML)
+        .openOn(map);
+
       maybeCloseSidebarForMobile();
     }
   }
-  /* *** END CHANGE *** */
+  /* ====== END ONLY CHANGE ====== */
 
   // ------------------ Cluster toggle helpers ------------------
   let layersControl = null;
@@ -549,7 +492,7 @@
     rows.forEach((r) => {
       const lat = getNumberFromKeys(r, LAT_KEYS);
       const lng = getNumberFromKeys(r, LNG_KEYS);
-      if (isNaN(lat) || isNaN(lng)) return; // (already in your original)
+      if (isNaN(lat) || isNaN(lng)) return;
 
       const id = pick(r.id, r.ID);
       const color = pickColor(r);
@@ -573,8 +516,6 @@
             img.addEventListener("error", () => setStatus(`Image not found: ${srcShown}`, true), { once: true });
           }
         } catch (e) { console.warn("Image hook error:", e); }
-        // (optional) mirror to dock when popup opens:
-        // showMediaInDock(r);
       });
 
       const groupName = pick(r.cluster_group, "Unassigned");
@@ -641,7 +582,7 @@
         currentRows = results.data;
         buildHierarchy(currentRows);
         addRows(currentRows);
-        applyClusterMode(); 
+        applyClusterMode(); // build correct layer control & apply current mode
       },
       error: (err) => {
         console.error("CSV parse error:", err);
@@ -664,4 +605,3 @@
   </script>
 </body>
 </html>
-
